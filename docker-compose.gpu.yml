@@ -1,0 +1,20 @@
+services:
+  tei-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.6
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.6
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

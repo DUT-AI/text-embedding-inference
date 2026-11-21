@@ -1,0 +1,142 @@
+# ==============================================================================
+# Nginx API Gateway Configuration for TEI (with API Key Authentication)
+# ==============================================================================
+
+# Trích xuất Token từ header 'Authorization: Bearer <token>'
+map $http_authorization $bearer_token {
+    "~^Bearer\s+(.+)$" $1;
+    default "";
+}
+
+# Lấy key từ X-API-Key hoặc api-key header
+map $http_x_api_key $custom_api_key {
+    "" $http_api_key;
+    default $http_x_api_key;
+}
+
+# Lựa chọn key được gửi lên (ưu tiên custom header rồi đến Bearer token)
+map $custom_api_key $client_key {
+    "" $bearer_token;
+    default $custom_api_key;
+}
+
+# So khớp với biến môi trường API_KEY (được Nginx envsubst tự động nạp)
+map $client_key $is_authorized {
+    default 0;
+    "${API_KEY}" 1;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    client_max_body_size 64M;
+    proxy_read_timeout 300s;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 300s;
+
+    # Định dạng JSON cho lỗi 401 Unauthorized
+    error_page 401 = @unauthorized;
+    location @unauthorized {
+        default_type application/json;
+        return 401 '{"error":{"message":"Unauthorized: Missing or invalid API Key. Please provide valid key via Authorization: Bearer <API_KEY> or X-API-Key header.","type":"authentication_error","code":401}}\n';
+    }
+
+    # --------------------------------------------------------------------------
+    # Public Endpoints (Root Info & Health Checks)
+    # --------------------------------------------------------------------------
+    location = / {
+        default_type application/json;
+        return 200 '{"status":"online","service":"Text Embeddings Inference Gateway (Vietnamese)","auth_configured":true,"endpoints":{"embedding":{"native":"POST /embed","openai_compatible":"POST /v1/embeddings","info":"GET /info/embedding","health":"GET /health/embedding"},"reranking":{"native":"POST /rerank","openai_compatible":"POST /v1/rerank","info":"GET /info/rerank","health":"GET /health/rerank"}}}\n';
+    }
+
+    location /health/embedding {
+        proxy_pass http://tei-embedding:80/health;
+    }
+
+    location /health/rerank {
+        proxy_pass http://tei-reranker:80/health;
+    }
+
+    location /info/embedding {
+        if ($is_authorized = 0) {
+            return 401;
+        }
+        proxy_pass http://tei-embedding:80/info;
+    }
+
+    location /info/rerank {
+        if ($is_authorized = 0) {
+            return 401;
+        }
+        proxy_pass http://tei-reranker:80/info;
+    }
+
+    # --------------------------------------------------------------------------
+    # 1. EMBEDDING SERVICE ROUTING (Protected by API Key)
+    # --------------------------------------------------------------------------
+    
+    # Endpoint chuẩn TEI (/embed)
+    location /embed {
+        if ($is_authorized = 0) {
+            return 401;
+        }
+        proxy_pass http://tei-embedding:80/embed;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Endpoint dự đoán / phân loại (/predict)
+    location /predict {
+        if ($is_authorized = 0) {
+            return 401;
+        }
+        proxy_pass http://tei-embedding:80/predict;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Endpoint chuẩn OpenAI format (/v1/embeddings)
+    location /v1/embeddings {
+        if ($is_authorized = 0) {
+            return 401;
+        }
+        proxy_pass http://tei-embedding:80/v1/embeddings;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # --------------------------------------------------------------------------
+    # 2. RERANKER SERVICE ROUTING (Protected by API Key)
+    # --------------------------------------------------------------------------
+    
+    # Endpoint chuẩn Rerank (/rerank)
+    location /rerank {
+        if ($is_authorized = 0) {
+            return 401;
+        }
+        proxy_pass http://tei-reranker:80/rerank;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Endpoint alias /v1/rerank
+    location /v1/rerank {
+        if ($is_authorized = 0) {
+            return 401;
+        }
+        proxy_pass http://tei-reranker:80/rerank;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

@@ -1,0 +1,71 @@
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Embedding Service (Hỗ trợ tiếng Việt qua BAAI/bge-m3)
+  # ----------------------------------------------------------------------------
+  tei-embedding:
+    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.6}
+    container_name: tei-embedding
+    restart: unless-stopped
+    ports:
+      - "${EMBEDDING_PORT:-8082}:80"
+    volumes:
+      - ./data:/data
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    command: >
+      --model-id ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      --port 80
+      --max-client-batch-size ${MAX_CLIENT_BATCH_SIZE:-32}
+      --max-batch-tokens ${MAX_BATCH_TOKENS:-16384}
+      --auto-truncate
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+
+  tei-reranker:
+    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.6}
+    container_name: tei-reranker
+    restart: unless-stopped
+    ports:
+      - "${RERANKER_PORT:-8083}:80"
+    volumes:
+      - ./data:/data
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    command: >
+      --model-id ${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
+      --port 80
+      --max-client-batch-size ${MAX_CLIENT_BATCH_SIZE:-32}
+      --max-batch-tokens ${MAX_BATCH_TOKENS:-16384}
+      --auto-truncate
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+
+  # ----------------------------------------------------------------------------
+  # 3. Nginx API Gateway (Gom toàn bộ endpoints về cổng 8090 và xác thực API_KEY)
+  # ----------------------------------------------------------------------------
+  gateway:
+    image: nginx:alpine
+    container_name: tei-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8090}:80"
+    environment:
+      - API_KEY=${API_KEY:-sk-tei-vietnamese-secret-key}
+      - NGINX_ENVSUBST_FILTER=API_KEY
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      - tei-embedding
+      - tei-reranker
+
+volumes:
+  data:
+    driver: local
